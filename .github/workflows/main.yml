@@ -13,6 +13,7 @@ on:
   pull_request:
     branches:
       - '*'
+  workflow_dispatch:
 
 concurrency:
   group: build-${{ github.ref_name }}
@@ -152,23 +153,38 @@ jobs:
           -B "${{ github.workspace }}/build/ci" \
           -DCMAKE_SYSTEM_VERSION="${{ env.CMAKE_SYSTEM_VERSION }}" \
           -DCMAKE_INTERPROCEDURAL_OPTIMIZATION=ON \
+          -DCMAKE_INSTALL_PREFIX="${{ github.workspace }}/build/ci/install" \
+          -DPACKAGE_PREFIX="${{ github.workspace }}/build/package" \
           -Dlibobs_DIR="${{ github.workspace }}/build/obs/install" \
           -DQt${{ matrix.qt }}_DIR="${{ github.workspace }}/build/qt" \
           -DFFmpeg_DIR="${{ github.workspace }}/build/obsdeps" \
           -DCURL_DIR="${{ github.workspace }}/build/obsdeps"
-    - name: "Build: Debug"
-      continue-on-error: true
-      shell: bash
-      env:
-        CMAKE_BUILD_TYPE: "Debug"
-      run: |
-        cmake --build "build/ci" --config ${{ env.CMAKE_BUILD_TYPE }} --target StreamFX
     - name: "Build: Release"
       shell: bash
-      env:
-        CMAKE_BUILD_TYPE: "RelWithDebInfo"
       run: |
-        cmake --build "build/ci" --config ${{ env.CMAKE_BUILD_TYPE }} --target StreamFX
+        cmake --build "build/ci" --config RelWithDebInfo --target install
+
+    - name: "Packaging (7-Zip)"
+      shell: bash
+      run: |
+        mkdir "${{ github.workspace }}/build/package"
+        cmake --build "build/ci" --config RelWithDebInfo --target PACKAGE_7Z
+
+    - name: "Install InnoSetup"
+      run: |
+        curl "-kL" "https://jrsoftware.org/download.php/is.exe" "-f" "--retry" "5" "-o" "inno.exe"
+        .\inno.exe /VERYSILENT /SP- /SUPPRESSMSGBOXES /NORESTART
+
+    - name: "Packaging (InnoSetup)"
+      shell: cmd
+      run: |
+        "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /V10 ".\build\ci\installer.iss"
+
+    - name: "Artifacts"
+      uses: actions/upload-artifact@v3
+      with:
+        name: "${{ matrix.name }}-${{ matrix.compiler }}-qt${{ matrix.qt }}"
+        path: "${{ github.workspace }}/build/package"
 
   macos:
     strategy:
@@ -292,21 +308,41 @@ jobs:
           -S "${{ github.workspace }}" \
           -B "${{ github.workspace }}/build/ci" \
           -DCMAKE_INTERPROCEDURAL_OPTIMIZATION=ON \
+          -DCMAKE_INSTALL_PREFIX="${{ github.workspace }}/build/ci/install" \
+          -DPACKAGE_PREFIX="${{ github.workspace }}/build/package" \
           -Dlibobs_DIR="${{ github.workspace }}/build/obs/install" \
           -DQt${{ matrix.qt }}_DIR="${{ github.workspace }}/build/qt" \
           -DFFmpeg_DIR="${{ github.workspace }}/build/obsdeps" \
           -DCURL_DIR="${{ github.workspace }}/build/obsdeps"
-    - name: "Build: Debug"
-      continue-on-error: true
-      shell: bash
-      run: |
-        cmake --build "build/ci" --config Debug --target StreamFX
     - name: "Build: Release"
       shell: bash
-      env:
-        CMAKE_BUILD_TYPE: "RelWithDebInfo"
       run: |
-        cmake --build "build/ci" --config RelWithDebInfo --target StreamFX
+        cmake --build "build/ci" --config RelWithDebInfo --target install
+
+    - name: "Packaging (7-Zip)"
+      shell: bash
+      run: |
+        mkdir "${{ github.workspace }}/build/package"
+        cmake --build "${{ github.workspace }}/build/ci" --config RelWithDebInfo --target PACKAGE_7Z
+
+    - name: 'Install Packages'
+      shell: bash
+      run: |
+        curl -kL https://cdn.xaymar.com/ci/Packages-1.2.10.dmg -f --retry 5 -o "Packages.dmg"
+        sudo hdiutil attach ./Packages.dmg
+        pushd /Volumes/Packages*
+        sudo installer -pkg ./Install\ Packages.pkg -target /
+
+    - name: "Packaging (Packages)"
+      shell: bash
+      run: |
+        packagesbuild "${{ github.workspace }}/build/ci/installer.pkgproj"
+
+    - name: "Artifacts"
+      uses: actions/upload-artifact@v3
+      with:
+        name: "${{ matrix.name }}-${{ matrix.compiler }}-qt${{ matrix.qt }}"
+        path: "${{ github.workspace }}/build/package"
 
   ubuntu:
     strategy:
@@ -459,15 +495,21 @@ jobs:
           -DCMAKE_CXX_COMPILER="${{ env.CMAKE_CXX_COMPILER }}" \
           -DCMAKE_INTERPROCEDURAL_OPTIMIZATION=ON \
           -DCMAKE_INSTALL_PREFIX="${{ github.workspace }}/build/ci/install" \
-          -DPACKAGE_NAME="streamfx-${{ env.PACKAGE_NAME }}" \
           -DPACKAGE_PREFIX="${{ github.workspace }}/build/package" \
           -Dlibobs_DIR="${{ github.workspace }}/build/obs/install"
-    - name: "Build: Debug"
-      continue-on-error: true
-      shell: bash
-      run: |
-        cmake --build "build/ci" --config Debug --target StreamFX
     - name: "Build: Release"
       shell: bash
       run: |
-        cmake --build "build/ci" --config RelWithDebInfo --target StreamFX
+        cmake --build "build/ci" --config RelWithDebInfo --target install/strip
+
+    - name: "Packaging (7-Zip)"
+      shell: bash
+      run: |
+        mkdir "${{ github.workspace }}/build/package"
+        cmake --build "build/ci" --config RelWithDebInfo --target PACKAGE_7Z
+
+    - name: "Artifacts"
+      uses: actions/upload-artifact@v3
+      with:
+        name: "${{ matrix.name }}-${{ matrix.compiler }}-qt${{ matrix.qt }}"
+        path: "${{ github.workspace }}/build/package"
